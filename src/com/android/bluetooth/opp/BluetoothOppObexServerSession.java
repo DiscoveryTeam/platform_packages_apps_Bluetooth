@@ -103,6 +103,10 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler implemen
 
     private long position;
 
+    private BluetoothOppManager mOppManager;
+
+    private static final int OPP_A2DP_SCO_CONCURRENCY_REDUCED_MTU_SIZE = 8192;
+
     public BluetoothOppObexServerSession(Context context, ObexTransport transport) {
         mContext = context;
         mTransport = transport;
@@ -124,7 +128,12 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler implemen
         try {
             if (D) Log.d(TAG, "Create ServerSession with transport " + mTransport.toString());
             mSession = new ServerSession(mTransport, this, null);
-        } catch (IOException e) {
+            mOppManager = BluetoothOppManager.getInstance(mContext);
+            if(mOppManager.isA2DPPlaying) {
+                mSession.reduceMTU(true);
+            }
+
+         } catch (IOException e) {
             Log.e(TAG, "Create server session error" + e);
         }
     }
@@ -371,6 +380,10 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler implemen
         mLocalShareInfoId = Integer.parseInt(contentUri.getPathSegments().get(1));
 
         if (needConfirm) {
+            if (!mWakeLock.isHeld()) {
+                if (D) Log.d(TAG, "acquire full WakeLock");
+                mWakeLock.acquire();
+            }
             Intent in = new Intent(BluetoothShare.INCOMING_FILE_CONFIRMATION_REQUEST_ACTION);
             in.setClassName(Constants.THIS_PACKAGE_NAME, BluetoothOppReceiver.class.getName());
             mContext.sendBroadcast(in);
@@ -384,8 +397,10 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler implemen
         synchronized (this) {
             mServerBlocking = true;
             if (mWakeLock.isHeld()) {
-                if (V) Log.v(TAG, "acquire partial WakeLock");
-                mPartialWakeLock.acquire();
+                if (!mPartialWakeLock.isHeld()) {
+                    if (D) Log.v(TAG, "acquire partial WakeLock");
+                    mPartialWakeLock.acquire();
+                }
                 mWakeLock.release();
             }
             try {
@@ -697,16 +712,18 @@ public class BluetoothOppObexServerSession extends ServerRequestHandler implemen
 
     private synchronized void releaseWakeLocks() {
         if (mWakeLock.isHeld()) {
+            if (D) Log.d(TAG, "releasing full wakelock");
             mWakeLock.release();
         }
         if (mPartialWakeLock.isHeld()) {
+            if (D) Log.d(TAG, "releasing partial wakelock");
             mPartialWakeLock.release();
         }
     }
 
     @Override
     public void onClose() {
-        if (V) Log.v(TAG, "release WakeLock");
+        if (D) Log.v(TAG, "onClose");
         releaseWakeLocks();
 
         /* onClose could happen even before start() where mCallback is set */
